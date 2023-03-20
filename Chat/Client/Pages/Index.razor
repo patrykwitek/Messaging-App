@@ -1,0 +1,161 @@
+﻿@page "/"
+@inject NavigationManager NavigationManager
+@implements IAsyncDisposable
+
+<PageTitle>Chat</PageTitle>
+<h1>Blazor SignalR Chat:</h1>
+
+@if (!IsConnected)
+{
+	<h3>Enter your username:</h3>
+
+	<input type="text" maxlength="32" @bind="username" class="form-control" id="entername"/>
+	<button type="button" class="btn btn-primary" @onclick="StartChatting">Start Chatting</button>
+
+	@if (message != null)
+	{
+		<small class="form-text text-muted">@message</small>
+	}
+}
+else
+{
+	<div>
+		<p>You are connected as <b>@username</b></p>
+		<button class="btn btn-primary btn-sm" @onclick="Disconnect">Quit Chatting</button>
+	</div>
+
+	<hr />
+
+	<div id="scrollbox">
+		@foreach (var item in messages)
+		{
+			@if (item.Notification)
+			{
+				<div class="newuser">@item.Content</div>
+			}
+			else
+			{
+				<div class="@item.Style">
+					<div class="username">
+						@item.Username
+					</div>
+					<div>
+						@item.Content
+					</div>
+				</div>
+			}
+		}
+		<hr />
+		<div class="input-group">
+			<input @bind-value="message" @bind-value:event="oninput" @onkeyup="HandleInput">
+			<button class="btn btn-primary" @onclick="Send" disabled="@(!IsConnected)">Send</button>
+		</div>
+	</div>
+}
+
+@code{
+	private HubConnection? hubConnection;
+	private string username = string.Empty;
+	private string message = string.Empty;
+
+	private class Message
+	{
+		public Message(string username, string body, bool ismine)
+		{
+			Username = username;
+			Content = body;
+
+			if (ismine)
+			{
+				Style = "mine";
+			}
+			else
+			{
+				Style = "notmine";
+			}
+
+			if (body.StartsWith("!Notification:"))
+			{
+				Notification = true;
+			}
+			else
+			{
+				Notification = false;
+			}
+		}
+
+		public string Username { get; set; }
+		public string Content { get; set; }
+		public string Style { get; set; }
+		public bool Notification { get; set; }
+	}
+
+	private List<Message> messages = new List<Message>();
+
+	private async Task StartChatting()
+	{
+		if (string.IsNullOrWhiteSpace(username))
+		{
+			message = "Enter a name";
+			return;
+		};
+
+		messages.Clear();
+
+		hubConnection = new HubConnectionBuilder()
+			.WithUrl(NavigationManager.ToAbsoluteUri("/chathub"))
+			.Build();
+
+		hubConnection.On<string, string>("ReceiveMessage", (user, message) =>
+		{
+			bool isMine = user.Equals(username, StringComparison.OrdinalIgnoreCase);
+
+			messages.Add(new Message(user, message, isMine));
+
+			StateHasChanged();
+		});
+
+		await hubConnection.StartAsync();
+
+		await Send("!Notification: " + username + " has joined the chat");
+	}
+
+	private async Task Send(string message)
+	{
+		if(IsConnected && !string.IsNullOrWhiteSpace(message))
+		{
+			await hubConnection.SendAsync("SendMessage", username, message);
+			message = string.Empty;
+		}
+	}
+
+	private async Task Send()
+	{
+		if (hubConnection != null)
+		{
+			await hubConnection.SendAsync("SendMessage", username, message);
+			message = string.Empty;
+		}
+	}
+
+	public bool IsConnected => hubConnection?.State == HubConnectionState.Connected;
+
+	private async Task Disconnect()
+	{
+		await Send($"!Notification: " + username + " has left the chat");
+		await DisposeAsync();
+	}
+
+	public async ValueTask DisposeAsync()
+	{
+		if(hubConnection != null)
+		{
+			await hubConnection.DisposeAsync();
+		}
+	}
+
+	private async Task HandleInput(KeyboardEventArgs args)
+	{
+		if(args.Key.Equals("Enter")) await Send();
+	}
+}
