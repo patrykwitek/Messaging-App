@@ -112,3 +112,8 @@ a, .btn-link {
     margin-bottom: 20px;
     text-align:center;
 }
+
+#date{
+    font-size:12px;
+    font-style:italic;
+}
